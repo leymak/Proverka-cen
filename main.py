@@ -1,7 +1,6 @@
 import asyncio
 import html
 import logging
-import os
 import random
 import re
 import aiosqlite
@@ -13,10 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise RuntimeError("Не задана переменная окружения BOT_TOKEN")
+from config import BOT_TOKEN
 
 DB_PATH = "prices.db"
 CHECK_INTERVAL_MINUTES = 15
@@ -82,81 +78,4 @@ async def cmd_start(message: Message, state: FSMContext):
         "Отправьте ссылку на товар с Wildberries (можно нажать «Поделиться» прямо из приложения WB), "
         "и я сообщу, когда цена упадёт до нужной отметки.\n\n"
         "Список отслеживаемых товаров: /list"
-    )
-
-
-@dp.message(Command("list"))
-async def cmd_list(message: Message):
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT name, target_price, url FROM items WHERE user_id = ? AND is_active = 1",
-            (message.from_user.id,),
-        ) as cursor:
-            rows = await cursor.fetchall()
-
-    if not rows:
-        await message.answer("Активных отслеживаний пока нет. Просто пришлите ссылку на товар.")
-        return
-
-    lines = [
-        f"• <a href='{url}'>{html.escape(name)}</a> — ждём <b>{price} ₽</b>"
-        for name, price, url in rows
-    ]
-    await message.answer("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
-
-
-@dp.message(F.text.contains("wildberries.ru/catalog/"))
-async def handle_url(message: Message, state: FSMContext):
-    nm_id = extract_wb_id(message.text or "")
-    if not nm_id:
-        await message.answer("Не удалось распознать артикул в ссылке. Проверьте формат URL.")
-        return
-
-    clean_url = f"https://www.wildberries.ru/catalog/{nm_id}/detail.aspx"
-    wait_msg = await message.answer("Проверяю карточку товара...")
-    product = await get_wb_product(nm_id)
-    if not product:
-        await wait_msg.edit_text("Товар не найден или сейчас нет в наличии.")
-        return
-
-    name, current_price = product
-    await state.update_data(nm_id=nm_id, name=name, url=clean_url, current_price=current_price)
-    await state.set_state(TrackState.waiting_for_price)
-
-    await wait_msg.edit_text(
-        f"<b>{html.escape(name)}</b>\n"
-        f"Текущая цена: <b>{current_price} ₽</b>\n\n"
-        f"Напишите желаемую цену в рублях (только число):",
-        parse_mode="HTML",
-    )
-
-
-@dp.message(TrackState.waiting_for_price)
-async def handle_target_price(message: Message, state: FSMContext):
-    digits = re.sub(r"\D", "", message.text or "")
-    if not digits or int(digits) <= 0:
-        await message.answer("Введите корректную цену числом, например: 2500")
-        return
-
-    target_price = int(digits)
-    data = await state.get_data()
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO items (user_id, nm_id, name, url, target_price) VALUES (?, ?, ?, ?, ?)",
-            (message.from_user.id, data["nm_id"], data["name"], data["url"], target_price),
-        )
-        await db.commit()
-
-    await state.clear()
-    await message.answer(
-        f"Готово! Отслеживаю <b>{html.escape(data['name'])}</b>.\n"
-        f"Сообщу, как только цена опустится до <b>{target_price} ₽</b> или ниже.",
-        parse_mode="HTML",
-    )
-
-
-async def check_prices():
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT id, user_id, nm_id, name, url, target_price FROM
+    
