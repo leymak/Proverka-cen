@@ -1,6 +1,7 @@
 import asyncio
 import html
 import logging
+import os
 import random
 import re
 import aiosqlite
@@ -13,7 +14,10 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-BOT_TOKEN = "ВАШ_ТОКЕН_ОТ_BOTFATHER"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("Не задана переменная окружения BOT_TOKEN")
+
 DB_PATH = "prices.db"
 CHECK_INTERVAL_MINUTES = 15
 
@@ -155,41 +159,4 @@ async def handle_target_price(message: Message, state: FSMContext):
 async def check_prices():
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT id, user_id, nm_id, name, url, target_price FROM items WHERE is_active = 1"
-        ) as cursor:
-            items = await cursor.fetchall()
-
-        for item_id, user_id, nm_id, name, url, target_price in items:
-            await asyncio.sleep(random.uniform(1.5, 4.0))
-            product = await get_wb_product(nm_id)
-            if not product:
-                continue
-
-            _, current_price = product
-            if current_price <= target_price:
-                try:
-                    await bot.send_message(
-                        chat_id=user_id,
-                        text=(
-                            f"🔥 <b>Цена снизилась!</b>\n\n"
-                            f"<a href='{url}'>{html.escape(name)}</a>\n"
-                            f"Текущая цена: <b>{current_price} ₽</b> (ваша цель: {target_price} ₽)"
-                        ),
-                        parse_mode="HTML",
-                    )
-                    await db.execute("UPDATE items SET is_active = 0 WHERE id = ?", (item_id,))
-                    await db.commit()
-                except Exception as e:
-                    logging.error(f"Ошибка отправки пользователю {user_id}: {e}")
-
-
-async def main():
-    await init_db()
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(check_prices, "interval", minutes=CHECK_INTERVAL_MINUTES)
-    scheduler.start()
-    await dp.start_polling(bot)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+            "SELECT id, user_id, nm_id, name, url, target_price FROM
